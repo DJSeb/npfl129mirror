@@ -33,8 +33,7 @@ def main(args: argparse.Namespace) -> list[float]:
     for order in range(1, args.range + 1):
         # DONE: Create features `(x^1, x^2, ..., x^order)`, preferably in this ordering.
         # Note that you can just append `x^order` to the features from the previous iteration.
-        for row in range(0, args.data_size):
-            features[row][order - 1] = xs[row]**order
+        features[:, order - 1] = xs ** order
 
         # DONE: Split the data into a train set and a test set.
         # Use `sklearn.model_selection.train_test_split` method call, passing
