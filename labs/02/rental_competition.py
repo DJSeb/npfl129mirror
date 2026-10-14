@@ -57,6 +57,8 @@ def main(args: argparse.Namespace) -> Optional[npt.ArrayLike]:
         # We are training a model.
         np.random.seed(args.seed)
         train = Dataset()
+        print(train)
+        raise RuntimeError
 
         # TODO: Train a model on the given dataset and store it in `model`.
         model = ...
