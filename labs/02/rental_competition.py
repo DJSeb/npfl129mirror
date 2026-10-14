@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+
+# Me: 4ae50bd7-2516-11ec-986f-f39926f24a9c (David jaromír Šebánek)
+# Team member 1: a652f90b-2220-11ec-986f-f39926f24a9c (Norbert Horváth)
+# Team member 2: 5212d2e4-2516-11ec-986f-f39926f24a9c (Samuel Serafín)
+
 import argparse
 import lzma
 import os
@@ -17,6 +22,7 @@ parser.add_argument("--recodex", default=False, action="store_true", help="Runni
 parser.add_argument("--seed", default=42, type=int, help="Random seed")
 # For these and any other arguments you add, ReCodEx will keep your default value.
 parser.add_argument("--model_path", default="rental_competition.model", type=str, help="Model path")
+parser.add_argument("--epochs", default=200, type=int, help="Count of epochs for SGD")
 
 
 class Dataset:
