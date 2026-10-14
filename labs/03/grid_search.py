@@ -1,12 +1,30 @@
 #!/usr/bin/env python3
+
+# Me: 4ae50bd7-2516-11ec-986f-f39926f24a9c (David jaromír Šebánek)
+# Team member 1: a652f90b-2220-11ec-986f-f39926f24a9c (Norbert Horváth)
+# Team member 2: 5212d2e4-2516-11ec-986f-f39926f24a9c (Samuel Serafín)
+
 import argparse
 
 import sklearn.datasets
 import sklearn.linear_model
-import sklearn.metrics
+# NOTE: Unused due to GridSearchCV's .score function.
+# import sklearn.metrics
 import sklearn.model_selection
 import sklearn.pipeline
 import sklearn.preprocessing
+
+# [NOTE: Moved up here so the warning actually takes effect.]
+# Note that with some hyperparameter values below [NOTE: edited to make sense],
+# the training does not converge in the default limit of 100 epochs and shows
+# `ConvergenceWarning`s. You can verify that increasing the number of epochs
+# influences the results only marginally, so there is no reason to do it.
+# To get rid of the warnings, you can add `-W ignore::UserWarning` just after
+# `python` on the command line, or you can use the following code
+# (and the corresponding imports):
+import warnings
+import sklearn.exceptions
+warnings.filterwarnings("ignore", category=sklearn.exceptions.ConvergenceWarning)
 
 parser = argparse.ArgumentParser()
 # These arguments will be set appropriately by ReCodEx, even if you change them.
@@ -24,11 +42,14 @@ def main(args: argparse.Namespace) -> float:
     # If you want to learn about the dataset, you can print some information
     # about it using `print(dataset.DESCR)`.
 
-    # TODO: Split the dataset into a train set and a test set.
+    # DONE: Split the dataset into a train set and a test set.
     # Use `sklearn.model_selection.train_test_split` method call, passing
     # arguments `test_size=args.test_size, random_state=args.seed`.
+    train_data, test_data, train_target, test_target = sklearn.model_selection.train_test_split(
+        dataset.data, dataset.target, test_size=args.test_size, random_state=args.seed
+    )
 
-    # TODO: Create a pipeline, which
+    # DONE: Create a pipeline, which
     # 1. passes the inputs through `sklearn.preprocessing.MinMaxScaler()`,
     # 2. passes the result through `sklearn.preprocessing.PolynomialFeatures()`,
     # 3. passes the result through `sklearn.linear_model.LogisticRegression(random_state=args.seed)`.
@@ -43,23 +64,36 @@ def main(args: argparse.Namespace) -> float:
     # For the best combination of parameters, compute the test set accuracy.
     #
     # The easiest way is to use `sklearn.model_selection.GridSearchCV`.
-    test_accuracy = ...
+    pipline = sklearn.pipeline.Pipeline([
+        ('minmax', sklearn.preprocessing.MinMaxScaler()),
+        ('polyfeats', sklearn.preprocessing.PolynomialFeatures()),
+        ('logress', sklearn.linear_model.LogisticRegression(random_state=args.seed))
+    ])
+
+    hyperparams = {
+        'polyfeats__degree': [1, 2],
+        'logress__C': [0.01, 1, 100],
+        'logress__solver': ['lbfgs', 'sag']
+    }
+
+    stratkfold = sklearn.model_selection.StratifiedKFold(n_splits=5)
+
+    model = sklearn.model_selection.GridSearchCV(pipline, hyperparams, cv=stratkfold)
+    model.fit(train_data, train_target)
+
+    test_accuracy = model.score(test_data, test_target)
 
     # If `model` is a fitted `GridSearchCV`, you can use the following code
     # to show the results of all the hyperparameter values evaluated:
-    #   for rank, accuracy, params in zip(model.cv_results_["rank_test_score"],
-    #                                     model.cv_results_["mean_test_score"],
-    #                                     model.cv_results_["params"]):
-    #       print("Rank: {:2d} Cross-val: {:.1f}%".format(rank, 100 * accuracy),
-    #             *("{}: {:<5}".format(key, value) for key, value in params.items()))
-
-    # Note that with some hyperparameter values above, the training does not
-    # converge in the default limit of 100 epochs and shows `ConvergenceWarning`s.
-    # You can verify that increasing the number of epochs influences the results
-    # only marginally, so there is no reason to do it. To get rid of the warnings,
-    # you can add `-W ignore::UserWarning` just after `python` on the command line,
-    # or you can use the following code (and the corresponding imports):
-    #   warnings.filterwarnings("ignore", category=sklearn.exceptions.ConvergenceWarning)
+    # for rank, accuracy, params in zip(
+    #     model.cv_results_["rank_test_score"],
+    #     model.cv_results_["mean_test_score"],
+    #     model.cv_results_["params"]
+    # ):
+    #     print(
+    #         "Rank: {:2d} Cross-val: {:.1f}%".format(rank, 100 * accuracy),
+    #         *( "{}: {:<5}".format(key, value) for key, value in params.items() )
+    #     )
 
     return 100 * test_accuracy
 
