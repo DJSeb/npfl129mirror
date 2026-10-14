@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+
+# Me: 4ae50bd7-2516-11ec-986f-f39926f24a9c (David jaromír Šebánek)
+# Team member 1: a652f90b-2220-11ec-986f-f39926f24a9c (Norbert Horváth)
+# Team member 2: 5212d2e4-2516-11ec-986f-f39926f24a9c (Samuel Serafín)
+
 import argparse
 
 import numpy as np
@@ -23,21 +28,32 @@ def main(args: argparse.Namespace) -> np.ndarray:
         n_clusters_per_class=1, flip_y=0, class_sep=2, random_state=args.seed)
     target = 2 * target - 1
 
-    # TODO: Append a constant feature with value 1 to the end of all input data.
+    # DONE: Append a constant feature with value 1 to the end of all input data.
     # Then we do not need to explicitly represent bias - it becomes the last weight.
+    bias_arr = np.ones(data.shape[0])
+    data_w_bias = np.column_stack((data, bias_arr))
 
     # Generate initial perceptron weights.
-    weights = np.zeros(data.shape[1])
+    weights = np.zeros(data_w_bias.shape[1])
 
     done = False
     while not done:
+        done = True
         permutation = generator.permutation(data.shape[0])
 
-        # TODO: Implement the perceptron algorithm, notably one iteration
+        # DONE: Implement the perceptron algorithm, notably one iteration
         # over the training data in the order of `permutation`. During the
         # training data iteration, perform the required updates to the `weights`
         # for incorrectly classified examples. If all training instances are
         # correctly classified, set `done=True`, otherwise set `done=False`.
+        for i in permutation:
+            example_vctr = data_w_bias[i]
+            computed = np.matmul(example_vctr, weights)
+            trgt_comp = target[i] * computed
+
+            if trgt_comp <= 0:
+                weights += target[i] * data_w_bias[i]
+                done = False
 
         if args.plot and not done:
             import matplotlib.pyplot as plt
