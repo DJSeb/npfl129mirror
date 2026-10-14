@@ -77,7 +77,7 @@ def main(args: argparse.Namespace) -> tuple[np.ndarray, np.ndarray]:
         ('poly_append', polyformer)
     ])
 
-    # TODO: Fit the feature preprocessing steps (the composed pipeline with all of
+    # DONE: Fit the feature preprocessing steps (the composed pipeline with all of
     # them; or the individual steps, if you prefer) on the training data (using `fit`).
     # Then transform the training data into `train_data` (with a `transform` call;
     # however, you can combine the two methods into a single `fit_transform` call).
