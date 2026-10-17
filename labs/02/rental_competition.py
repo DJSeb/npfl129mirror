@@ -14,6 +14,7 @@ import urllib.request
 
 import numpy as np
 import numpy.typing as npt
+import sklearn
 
 parser = argparse.ArgumentParser()
 # These arguments will be set appropriately by ReCodEx, even if you change them.
@@ -23,7 +24,7 @@ parser.add_argument("--seed", default=42, type=int, help="Random seed")
 # For these and any other arguments you add, ReCodEx will keep your default value.
 parser.add_argument("--model_path", default="rental_competition.model", type=str, help="Model path")
 parser.add_argument("--epochs", default=200, type=int, help="Count of epochs for SGD")
-
+POLYFORM_DEGS = 2
 
 class Dataset:
     """Rental Dataset.
@@ -44,9 +45,11 @@ class Dataset:
 
     The target variable is the number of rented bikes in the given hour.
     """
-    def __init__(self,
-                 name="rental_competition.train.npz",
-                 url="https://ufal.mff.cuni.cz/~courses/npfl129/2425/datasets/"):
+    def __init__(
+        self,
+        name="rental_competition.train.npz",
+        url="https://ufal.mff.cuni.cz/~courses/npfl129/2425/datasets/"
+    ):
         if not os.path.exists(name):
             print("Downloading dataset {}...".format(name), file=sys.stderr)
             urllib.request.urlretrieve(url + name, filename="{}.tmp".format(name))
@@ -63,11 +66,33 @@ def main(args: argparse.Namespace) -> Optional[npt.ArrayLike]:
         # We are training a model.
         np.random.seed(args.seed)
         train = Dataset()
-        print(train)
-        raise RuntimeError
+        train_data = train.data
+        train_target = train.target
+
+        # First enginner out the features (category-likes to one-hot, reals to std scale + polynomize)
+        tformer = sklearn.compose.ColumnTransformer([
+            ('category',
+                sklearn.preprocessing.OneHotEncoder(sparse_output=False, handle_unknown="ignore"),
+                [0, 1, 2, 3, 4, 5, 6, 7] # Hardcoded just like expected dataset structure
+            ),
+            ('polyreals',
+                sklearn.pipeline.Pipeline([
+                    ('std_scale',
+                        sklearn.preprocessing.StandardScaler(with_mean=True, with_std=True)
+                    ),
+                    ('poly_append',
+                        sklearn.preprocessing.PolynomialFeatures(POLYFORM_DEGS, include_bias=False)
+                    )
+                ]),
+                [8, 9, 10, 11]
+            )
+
+        ])
+        tformed_data = tformer.fit_transform(train.data)
+        biased_tformed_data = np.column_stack((tformed_data, np.ones(tformed_data.shape[0])))
 
         # TODO: Train a model on the given dataset and store it in `model`.
-        model = ...
+        model = sklearn.linear_model.R
 
         # Serialize the model.
         with lzma.open(args.model_path, "wb") as model_file:
