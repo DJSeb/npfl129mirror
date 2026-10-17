@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+
+# Me: 4ae50bd7-2516-11ec-986f-f39926f24a9c (David jaromír Šebánek)
+# Team member 1: a652f90b-2220-11ec-986f-f39926f24a9c (Norbert Horváth)
+# Team member 2: 5212d2e4-2516-11ec-986f-f39926f24a9c (Samuel Serafín)
+
 import argparse
 
 import numpy as np
@@ -18,6 +23,8 @@ parser.add_argument("--seed", default=42, type=int, help="Random seed")
 parser.add_argument("--test_size", default=0.5, type=lambda x: int(x) if x.isdigit() else float(x), help="Test size")
 # If you add more arguments, ReCodEx will keep them with your default values.
 
+def _sigmoid(x):
+    return 1 / (1 + np.exp(-x))
 
 def main(args: argparse.Namespace) -> tuple[np.ndarray, list[tuple[float, float]]]:
     # Create a random generator with a given seed.
@@ -27,12 +34,17 @@ def main(args: argparse.Namespace) -> tuple[np.ndarray, list[tuple[float, float]
     data, target = sklearn.datasets.make_classification(
         n_samples=args.data_size, n_features=2, n_informative=2, n_redundant=0, random_state=args.seed)
 
-    # TODO: Append a constant feature with value 1 to the end of all input data.
+    # DONE: Append a constant feature with value 1 to the end of all input data.
     # Then we do not need to explicitly represent bias - it becomes the last weight.
+    bias_arr = np.ones(data.shape[0])
+    data_w_bias = np.column_stack((data, bias_arr))
 
-    # TODO: Split the dataset into a train set and a test set.
+    # DONE: Split the dataset into a train set and a test set.
     # Use `sklearn.model_selection.train_test_split` method call, passing
     # arguments `test_size=args.test_size, random_state=args.seed`.
+    train_data, test_data, train_target, test_target = sklearn.model_selection.train_test_split(
+        data_w_bias, target, test_size=args.test_size, random_state=args.seed
+    )
 
     # Generate initial logistic regression weights.
     weights = generator.uniform(size=train_data.shape[1], low=-0.1, high=0.1)
@@ -40,14 +52,49 @@ def main(args: argparse.Namespace) -> tuple[np.ndarray, list[tuple[float, float]
     for epoch in range(args.epochs):
         permutation = generator.permutation(train_data.shape[0])
 
-        # TODO: Process the data in the order of `permutation`. For every
+        # DONE: Process the data in the order of `permutation`. For every
         # `args.batch_size` of them, average their gradient, and update the weights.
         # You can assume that `args.batch_size` exactly divides `train_data.shape[0]`.
+        for chunk_start in range(0, len(permutation), args.batch_size):
+            batch_indices = permutation[chunk_start:chunk_start + args.batch_size]
+            databatch = train_data[batch_indices]
+            targetbatch = train_target[batch_indices]
+            # Theory directly in Python:
+            # inner_gradient_sum = np.zeros(databatch.shape[1])
+            # for i in range(0, len(databatch)):
+            #     vctr = databatch[i]
+            #     trgt = targetbatch[i]
+            #     # gradient(-log(sigmoid(dot_product(x.T, w)))) with respect to w = (sigmoid(dot_product(x.T, w) - target) * x
+            #     dotp = np.dot(vctr, weights)
+            #     sigmoided = _sigmoid(dotp)
+            #     inner_gradient_sum = inner_gradient_sum + (sigmoided - trgt) * vctr
+            # gradient = inner_gradient_sum / len(databatch)
 
-        # TODO: After the SGD epoch, measure the average loss and accuracy for both the
+            # NumPy optimized:
+            gradient = np.matmul(
+                databatch.T,
+                (   
+                    _sigmoid(np.matmul(databatch, weights))
+                    - targetbatch
+                )
+            ) / len(databatch)
+
+            weights = weights - args.learning_rate * gradient
+
+        train_probs = _sigmoid(np.matmul(train_data, weights))
+        train_predlabels = (train_probs >= 0.5).astype(int)
+        
+        test_probs = _sigmoid(np.matmul(test_data, weights))
+        test_predlabels = (test_probs >= 0.5).astype(int)
+
+        # DONE: After the SGD epoch, measure the average loss and accuracy for both the
         # train set and the test set. The loss is the average MLE loss (i.e., the
         # negative log-likelihood, or cross-entropy loss, or KL loss) per example.
-        train_accuracy, train_loss, test_accuracy, test_loss = ...
+
+        train_accuracy = sklearn.metrics.accuracy_score(train_target, train_predlabels)
+        train_loss = sklearn.metrics.log_loss(train_target, train_probs)
+        test_accuracy = sklearn.metrics.accuracy_score(test_target, test_predlabels)
+        test_loss = sklearn.metrics.log_loss(test_target, test_probs)
 
         print("After epoch {}: train loss {:.4f} acc {:.1f}%, test loss {:.4f} acc {:.1f}%".format(
             epoch + 1, train_loss, 100 * train_accuracy, test_loss, 100 * test_accuracy))
