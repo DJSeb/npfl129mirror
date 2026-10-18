@@ -6,9 +6,12 @@
 
 import argparse
 import lzma
+from dataclasses import dataclass
 import os
+from pathlib import Path 
 import pickle
 import sys
+from textwrap import dedent
 from typing import Optional
 import urllib.request
 
@@ -22,9 +25,45 @@ parser.add_argument("--predict", default=None, type=str, help="Path to the datas
 parser.add_argument("--recodex", default=False, action="store_true", help="Running in ReCodEx")
 parser.add_argument("--seed", default=42, type=int, help="Random seed")
 # For these and any other arguments you add, ReCodEx will keep your default value.
-parser.add_argument("--model_path", default="rental_competition.model", type=str, help="Model path")
-parser.add_argument("--epochs", default=200, type=int, help="Count of epochs for SGD")
-POLYFORM_DEGS = 2
+parser.add_argument("--model_path",
+    default=str((Path(__file__).resolve().parent / "rental_competition.model")),
+    type=str,
+    help="Model path"
+)
+
+@dataclass
+class SgdHyperparameters:
+    epochs = 800
+    batch_size = 64
+    learning_rate = 0.01
+    l2 = 0.0001
+
+def print_epoch_metrics_outside_recodex(
+    recodex_is_on,
+    epoch,
+    train_target,
+    epoch_trainpreds,
+    test_target,
+    epoch_testpreds
+):
+    if recodex_is_on:
+        return
+    
+    print(dedent(
+        f"""
+        ###
+        Epoch #{epoch}:
+            -> train RMSE: {sklearn.metrics.root_mean_squared_error(train_target, epoch_trainpreds)}
+            -> test RMSE: {sklearn.metrics.root_mean_squared_error(test_target, epoch_testpreds)}
+        ###
+        """
+    )) if epoch % 100 == 0 else None
+
+def print_final_rmse_outside_recodex(recodex_is_on, test_target, predictions):
+    if recodex_is_on:
+        return
+
+    print(f"RMSE: {sklearn.metrics.root_mean_squared_error(test_target, predictions)}")
 
 class Dataset:
     """Rental Dataset.
@@ -66,33 +105,74 @@ def main(args: argparse.Namespace) -> Optional[npt.ArrayLike]:
         # We are training a model.
         np.random.seed(args.seed)
         train = Dataset()
-        train_data = train.data
-        train_target = train.target
 
-        # First enginner out the features (category-likes to one-hot, reals to std scale + polynomize)
-        tformer = sklearn.compose.ColumnTransformer([
-            ('category',
-                sklearn.preprocessing.OneHotEncoder(sparse_output=False, handle_unknown="ignore"),
-                [0, 1, 2, 3, 4, 5, 6, 7] # Hardcoded just like expected dataset structure
-            ),
-            ('polyreals',
-                sklearn.pipeline.Pipeline([
-                    ('std_scale',
-                        sklearn.preprocessing.StandardScaler(with_mean=True, with_std=True)
-                    ),
-                    ('poly_append',
-                        sklearn.preprocessing.PolynomialFeatures(POLYFORM_DEGS, include_bias=False)
-                    )
-                ]),
-                [8, 9, 10, 11]
+        train_data, test_data, train_target, test_target = sklearn.model_selection.train_test_split(
+            train.data, train.target, random_state=args.seed, test_size=0.25
+        )
+
+        all_cols = np.arange(0, train_data.shape[1])
+        # Hardcoded just like expected dataset structure
+        cat_cols = all_cols[0:8]
+        real_cols = all_cols[8:train_data.shape[1]]
+
+        tformer = sklearn.pipeline.Pipeline([
+            ('col_tform', sklearn.compose.ColumnTransformer([
+                ('category',
+                    sklearn.preprocessing.OneHotEncoder(sparse_output=False, handle_unknown="ignore"),
+                    cat_cols
+                ),
+                ('std_scale',
+                    sklearn.preprocessing.StandardScaler(with_mean=True, with_std=True),
+                    real_cols
+                )
+            ])),
+            ('poly_append', sklearn.preprocessing.PolynomialFeatures(2, include_bias=False)),
+        ])
+
+        tformed_traind = tformer.fit_transform(train_data)
+        traind_rows = tformed_traind.shape[0]
+        biased_tf_traind = np.column_stack((tformed_traind, np.ones(traind_rows)))
+
+        tformed_testd = tformer.transform(test_data)
+        biased_tf_testd = np.column_stack((tformed_testd, np.ones(tformed_testd.shape[0])))
+
+        generator = np.random.RandomState(args.seed)
+        weights = generator.uniform(size=biased_tf_traind.shape[1], low=-0.1, high=0.1)
+        for epoch in range(SgdHyperparameters.epochs):
+            permutation = generator.permutation(traind_rows)
+
+            for i in range(0, len(permutation), SgdHyperparameters.batch_size):
+                batch_indices = permutation[i:max((i + SgdHyperparameters.batch_size), len(permutation))]
+                databatch = biased_tf_traind[batch_indices]
+                targetbatch = train_target[batch_indices]
+
+                unregularized = np.matmul(
+                    np.matmul(databatch, weights) - targetbatch,
+                    databatch
+                ) / len(batch_indices)
+                
+                weights_w_zbias = weights.copy()
+                weights_w_zbias[-1] = 0
+                reg_loss = SgdHyperparameters.l2 * weights_w_zbias
+
+                gradient = unregularized + reg_loss
+                weights = weights - SgdHyperparameters.learning_rate * gradient
+
+            epoch_trainpreds = np.matmul(biased_tf_traind, weights)
+            epoch_testpreds = np.matmul(biased_tf_testd, weights)
+
+            print_epoch_metrics_outside_recodex(
+                args.recodex, epoch,
+                train_target, epoch_trainpreds,
+                test_target, epoch_testpreds
             )
 
-        ])
-        tformed_data = tformer.fit_transform(train.data)
-        biased_tformed_data = np.column_stack((tformed_data, np.ones(tformed_data.shape[0])))
-
-        # TODO: Train a model on the given dataset and store it in `model`.
-        model = sklearn.linear_model.R
+        model = {
+            "transformer": tformer,
+            "weights": weights
+        }
+        predictions = np.matmul(biased_tf_testd, weights)
+        print_final_rmse_outside_recodex(args.recodex, test_target, predictions)
 
         # Serialize the model.
         with lzma.open(args.model_path, "wb") as model_file:
@@ -101,12 +181,20 @@ def main(args: argparse.Namespace) -> Optional[npt.ArrayLike]:
     else:
         # Use the model and return test set predictions, either as a Python list or a NumPy array.
         test = Dataset(args.predict)
+        test_data = test.data
 
         with lzma.open(args.model_path, "rb") as model_file:
             model = pickle.load(model_file)
 
-        # TODO: Generate `predictions` with the test set predictions.
-        predictions = ...
+        # DONE: Generate `predictions` with the test set predictions.
+        tformed_testd = model["transformer"].transform(test_data)
+        predictions = np.matmul(
+            np.column_stack((
+                tformed_testd,
+                np.ones(tformed_testd.shape[0])
+            )),
+            model["weights"]
+        )
 
         return predictions
 
