@@ -33,37 +33,27 @@ parser.add_argument("--model_path",
 
 @dataclass
 class SgdHyperparameters:
-    epochs = 800
+    # Generally useful
+    epochs = 600
+    learning_rate = 0.05
+    l2 = 0.05
+    # Custom only
     batch_size = 64
-    learning_rate = 0.01
-    l2 = 0.0001
+    # Sklearn only
+    loss_func = 'squared_error'
+    regularization = 'l2'
+    average=False
+    no_changes_limit = 25
+    tolerance = 1e-5
+    how_to_learn = 'invscaling'
+    have_internal_bias = True # Let sklearn handle the bias
+    do_epoch_shuffle = True
 
-def print_epoch_metrics_outside_recodex(
-    recodex_is_on,
-    epoch,
-    train_target,
-    epoch_trainpreds,
-    test_target,
-    epoch_testpreds
-):
-    if recodex_is_on:
-        return
-    
-    print(dedent(
-        f"""
-        ###
-        Epoch #{epoch}:
-            -> train RMSE: {sklearn.metrics.root_mean_squared_error(train_target, epoch_trainpreds)}
-            -> test RMSE: {sklearn.metrics.root_mean_squared_error(test_target, epoch_testpreds)}
-        ###
-        """
-    )) if epoch % 100 == 0 else None
-
-def print_final_rmse_outside_recodex(recodex_is_on, test_target, predictions):
+def print_final_rmse_outside_recodex(recodex_is_on, target, predictions):
     if recodex_is_on:
         return
 
-    print(f"RMSE: {sklearn.metrics.root_mean_squared_error(test_target, predictions)}")
+    print(f"RMSE: {sklearn.metrics.root_mean_squared_error(target, predictions)}")
 
 class Dataset:
     """Rental Dataset.
@@ -116,62 +106,41 @@ def main(args: argparse.Namespace) -> Optional[npt.ArrayLike]:
         real_cols = all_cols[8:train_data.shape[1]]
 
         tformer = sklearn.pipeline.Pipeline([
-            ('col_tform', sklearn.compose.ColumnTransformer([
-                ('category',
-                    sklearn.preprocessing.OneHotEncoder(sparse_output=False, handle_unknown="ignore"),
-                    cat_cols
-                ),
-                ('std_scale',
-                    sklearn.preprocessing.StandardScaler(with_mean=True, with_std=True),
-                    real_cols
-                )
+            ("col_tform", sklearn.compose.ColumnTransformer([
+                ("category",
+                sklearn.preprocessing.OneHotEncoder(sparse_output=False, handle_unknown="ignore"),
+                cat_cols),
+                ("std_scale",
+                sklearn.preprocessing.StandardScaler(with_mean=True, with_std=True),
+                real_cols),
             ])),
-            ('poly_append', sklearn.preprocessing.PolynomialFeatures(2, include_bias=False)),
+            ("poly_append", sklearn.preprocessing.PolynomialFeatures(2, include_bias=False)),
         ])
 
-        tformed_traind = tformer.fit_transform(train_data)
-        traind_rows = tformed_traind.shape[0]
-        biased_tf_traind = np.column_stack((tformed_traind, np.ones(traind_rows)))
+        lin_model = sklearn.linear_model.SGDRegressor(
+            loss=SgdHyperparameters.loss_func,
+            penalty=SgdHyperparameters.regularization,
+            alpha=SgdHyperparameters.l2,
+            fit_intercept=SgdHyperparameters.have_internal_bias,
+            learning_rate=SgdHyperparameters.how_to_learn,
+            eta0=SgdHyperparameters.learning_rate,
+            max_iter=SgdHyperparameters.epochs,
+            tol=SgdHyperparameters.tolerance,
+            shuffle=SgdHyperparameters.do_epoch_shuffle,
+            n_iter_no_change=SgdHyperparameters.no_changes_limit,
+            average=SgdHyperparameters.batch_size,
+            random_state=args.seed
+        )
 
-        tformed_testd = tformer.transform(test_data)
-        biased_tf_testd = np.column_stack((tformed_testd, np.ones(tformed_testd.shape[0])))
+        model = sklearn.pipeline.Pipeline([
+            ("transformer", tformer),
+            ("linear_model", lin_model),
+        ])
 
-        generator = np.random.RandomState(args.seed)
-        weights = generator.uniform(size=biased_tf_traind.shape[1], low=-0.1, high=0.1)
-        for epoch in range(SgdHyperparameters.epochs):
-            permutation = generator.permutation(traind_rows)
+        model.fit(train_data, train_target)
 
-            for i in range(0, len(permutation), SgdHyperparameters.batch_size):
-                batch_indices = permutation[i:max((i + SgdHyperparameters.batch_size), len(permutation))]
-                databatch = biased_tf_traind[batch_indices]
-                targetbatch = train_target[batch_indices]
-
-                unregularized = np.matmul(
-                    np.matmul(databatch, weights) - targetbatch,
-                    databatch
-                ) / len(batch_indices)
-                
-                weights_w_zbias = weights.copy()
-                weights_w_zbias[-1] = 0
-                reg_loss = SgdHyperparameters.l2 * weights_w_zbias
-
-                gradient = unregularized + reg_loss
-                weights = weights - SgdHyperparameters.learning_rate * gradient
-
-            epoch_trainpreds = np.matmul(biased_tf_traind, weights)
-            epoch_testpreds = np.matmul(biased_tf_testd, weights)
-
-            print_epoch_metrics_outside_recodex(
-                args.recodex, epoch,
-                train_target, epoch_trainpreds,
-                test_target, epoch_testpreds
-            )
-
-        model = {
-            "transformer": tformer,
-            "weights": weights
-        }
-        predictions = np.matmul(biased_tf_testd, weights)
+        predictions = model.predict(test_data)
+        print_final_rmse_outside_recodex(args.recodex, train_target, model.predict(train_data))
         print_final_rmse_outside_recodex(args.recodex, test_target, predictions)
 
         # Serialize the model.
@@ -187,14 +156,7 @@ def main(args: argparse.Namespace) -> Optional[npt.ArrayLike]:
             model = pickle.load(model_file)
 
         # DONE: Generate `predictions` with the test set predictions.
-        tformed_testd = model["transformer"].transform(test_data)
-        predictions = np.matmul(
-            np.column_stack((
-                tformed_testd,
-                np.ones(tformed_testd.shape[0])
-            )),
-            model["weights"]
-        )
+        predictions = model.predict(test_data)
 
         return predictions
 
