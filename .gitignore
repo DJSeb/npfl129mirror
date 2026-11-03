@@ -1,3 +1,5 @@
 /rental_competition.train.npz
 /thyroid_competition.train.npz
 /seed_runs.log
+/labs/04/mnist_competition.model
+/mnist.train.npz
