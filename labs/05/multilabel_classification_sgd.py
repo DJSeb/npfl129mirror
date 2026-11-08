@@ -32,6 +32,8 @@ parser.add_argument("--seed", default=42, type=int, help="Random seed")
 parser.add_argument("--test_size", default=0.5, type=lambda x: int(x) if x.isdigit() else float(x), help="Test size")
 # If you add more arguments, ReCodEx will keep them with your default values.
 
+def _sigmoid(x):
+    return 1 / (1 + np.exp(-x))
 
 def main(args: argparse.Namespace) -> tuple[np.ndarray, list[tuple[float, float]]]:
     # Create a random generator with a given seed.
@@ -42,10 +44,14 @@ def main(args: argparse.Namespace) -> tuple[np.ndarray, list[tuple[float, float]
         n_samples=args.data_size, n_classes=args.classes, allow_unlabeled=False,
         return_indicator=False, random_state=args.seed)
 
-    # TODO: The `target` is a list of classes for every input example. Convert
+    # DONE: The `target` is a list of classes for every input example. Convert
     # it to a dense representation (n-hot encoding) -- for each input example,
     # the target should be vector of `args.classes` binary indicators.
-    target = ...
+    target = np.zeros((len(target_list), args.classes), dtype=int)
+    
+    for idx, classes in enumerate(target_list):
+        for clss in classes:
+            target[idx, clss] = 1
 
     # Append a constant feature with value 1 to the end of all input data.
     # Then we do not need to explicitly represent bias - it becomes the last weight.
@@ -63,15 +69,121 @@ def main(args: argparse.Namespace) -> tuple[np.ndarray, list[tuple[float, float]
     for epoch in range(args.epochs):
         permutation = generator.permutation(train_data.shape[0])
 
-        # TODO: Process the data in the order of `permutation`. For every
+        # DONE: Process the data in the order of `permutation`. For every
         # `args.batch_size` of them, average their gradient, and update the weights.
         # You can assume that `args.batch_size` exactly divides `train_data.shape[0]`.
-        ...
+        for chunk_start in range(0, len(permutation), args.batch_size):
+            # Here, it is a useless safeguard, but elsewhere it should guard against non-pretty shapes
+            eobindices = min(len(permutation), (chunk_start + args.batch_size))
+            batch_indices = permutation[chunk_start:eobindices]
+            databatch = train_data[batch_indices]
+            targetbatch = train_target[batch_indices]
 
-        # TODO: After the SGD epoch, compute the micro-averaged and the
+            gradient = np.matmul(
+                databatch.T,
+                (   
+                    _sigmoid(np.matmul(databatch, weights))
+                    - targetbatch
+                )
+            ) / len(databatch)
+
+            weights = weights - args.learning_rate * gradient
+
+        # DONE: After the SGD epoch, compute the micro-averaged and the
         # macro-averaged F1-score for both the train test and the test set.
         # Compute these scores manually, without using `sklearn.metrics`.
-        train_f1_micro, train_f1_macro, test_f1_micro, test_f1_macro = ...
+
+        train_probs = _sigmoid(np.matmul(train_data, weights))
+        train_predlabels = (train_probs >= 0.5).astype(int)
+        
+        test_probs = _sigmoid(np.matmul(test_data, weights))
+        test_predlabels = (test_probs >= 0.5).astype(int)
+
+        train_micro_tp = np.sum(
+            (np.array(train_predlabels) == 1)
+            & (np.array(train_target) == 1)
+        )
+        train_micro_fp = np.sum(
+            (np.array(train_predlabels) == 1)
+            & (np.array(train_target) == 0)
+        ) 
+        train_micro_fn = np.sum(
+            (np.array(train_predlabels) == 0)
+            & (np.array(train_target) == 1)
+        )
+        train_f1_micro = (
+            (2 * train_micro_tp)
+            / (
+                (2 * train_micro_tp)
+                + train_micro_fp
+                + train_micro_fn
+            )
+        )
+
+        train_macro_tp = np.sum(
+            (np.array(train_predlabels) == 1)
+            & (np.array(train_target) == 1)
+        , axis=0)
+        train_macro_fp = np.sum(
+            (np.array(train_predlabels) == 1)
+            & (np.array(train_target) == 0)
+        , axis=0) 
+        train_macro_fn = np.sum(
+            (np.array(train_predlabels) == 0)
+            & (np.array(train_target) == 1)
+        , axis=0)
+        train_f1_macro = np.average((
+            (2 * train_macro_tp)
+            / (
+                (2 * train_macro_tp)
+                + train_macro_fp
+                + train_macro_fn
+            )
+        ))
+        
+        test_micro_tp = np.sum(
+            (np.array(test_predlabels) == 1)
+            & (np.array(test_target) == 1)
+        )
+        test_micro_fp = np.sum(
+            (np.array(test_predlabels) == 1)
+            & (np.array(test_target) == 0)
+        ) 
+        test_micro_fn = np.sum(
+            (np.array(test_predlabels) == 0)
+            & (np.array(test_target) == 1)
+        )
+        test_f1_micro =  (
+            (2 * test_micro_tp)
+            / (
+                (2 * test_micro_tp)
+                + test_micro_fp
+                + test_micro_fn
+            )
+        )
+
+
+        test_macro_tp = np.sum(
+            (np.array(test_predlabels) == 1)
+            & (np.array(test_target) == 1)
+        , axis=0)
+        test_macro_fp = np.sum(
+            (np.array(test_predlabels) == 1)
+            & (np.array(test_target) == 0)
+        , axis=0) 
+        test_macro_fn = np.sum(
+            (np.array(test_predlabels) == 0)
+            & (np.array(test_target) == 1)
+        , axis=0)
+        test_f1_macro = np.average((
+            (2 * test_macro_tp)
+            / (
+                (2 * test_macro_tp)
+                + test_macro_fp
+                + test_macro_fn
+            )
+        ))
+
 
         print("After epoch {}: train F1 micro {:.2f}% macro {:.2f}%, test F1 micro {:.2f}% macro {:.1f}%".format(
             epoch + 1, 100 * train_f1_micro, 100 * train_f1_macro, 100 * test_f1_micro, 100 * test_f1_macro))
