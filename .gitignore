@@ -3,3 +3,4 @@
 /seed_runs.log
 /labs/04/mnist_competition.model
 /mnist.train.npz
+/labs/05/diacritization.model
