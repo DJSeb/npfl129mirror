@@ -4,3 +4,5 @@
 /labs/04/mnist_competition.model
 /mnist.train.npz
 /labs/05/diacritization.model
+/labs/06/imdb_sentiment.model
+/labs/06/diacritization.model
