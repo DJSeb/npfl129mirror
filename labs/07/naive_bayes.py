@@ -70,6 +70,39 @@ def log_probs_gauss(data, k_priors, k_means, k_vars):
     )
     return log_probabilities
 
+def train_bernoulli(train_data, k_classes, k_class_indices, alpha):
+    k_priors = np.empty(k_classes.shape[0])
+    # p_{d,k} values, "positive probabilities"
+    k_posprobs = np.empty((k_classes.shape[0], train_data.shape[1]))
+
+    for k_idx, _ in enumerate(k_classes):
+        class_samples_indices = (k_class_indices == k_idx)
+        class_samples = train_data[class_samples_indices]
+
+        # Basic frequency
+        k_priors[k_idx] = class_samples.shape[0] / train_data.shape[0]
+        # Probability values computation
+        k_posprobs[k_idx] = (
+            (np.sum(class_samples, axis=0) + alpha)
+            / (class_samples.shape[0] + (2 * alpha))
+        )
+
+    return k_priors, k_posprobs
+
+def log_probs_bernoulli(data, k_priors, k_posprobs):
+    posprobs_w_samples_dim = k_posprobs[None, :, :]
+    log_probabilities = (
+        np.sum(
+            (
+                data[:, None, :] * np.log(posprobs_w_samples_dim)
+                + (1 - data[:, None, :]) * np.log(1 - posprobs_w_samples_dim)
+            ) ,
+            axis = 2
+        )
+        + np.log(k_priors)[None, :]
+    )
+    return log_probabilities
+
 def joint_log_probability(log_probabilities, targets, k_classes):
     class_to_idx = {k: i for i, k in enumerate(k_classes)}
     target_indices = np.array([class_to_idx[t] for t in targets])
@@ -111,7 +144,16 @@ def main(args: argparse.Namespace) -> tuple[float, float]:
     # Split by class
     k_classes, k_class_indices = np.unique(train_target, return_inverse=True)
     log_probabilities = None
-    if args.naive_bayes_type == 'gaussian':
+    if args.naive_bayes_type == 'bernoulli':
+        # Train
+        btrain_data = (train_data >= 8).astype(int)
+        k_priors, k_posprobs = train_bernoulli(btrain_data, k_classes, k_class_indices, args.alpha)
+        # Log probs for prediction
+        btest_data = (test_data >= 8).astype(int)
+        log_probabilities = log_probs_bernoulli(btest_data, k_priors, k_posprobs)
+    elif args.naive_bayes_type == 'multinomial':
+        
+    else: # Gauss
         # Train
         (
             class_idx_to_prior,
@@ -127,13 +169,6 @@ def main(args: argparse.Namespace) -> tuple[float, float]:
             class_idx_to_var
         )
         print(log_probabilities)
-    elif args.naive_bayes_type == 'multinomial':
-        ...
-    elif args.naive_bayes_type == 'bernoulli':
-        train_binary = (train_data >= 8).astype(int)
-        ...
-    else:
-        raise RuntimeError('Unexpected naive Bayes type')
 
     # DONE: Predict the test data classes, and compute
     # - the test set accuracy, and
